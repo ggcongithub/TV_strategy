@@ -1,0 +1,56 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © ggcworking
+//@version=5
+strategy("ggc_anti_sar_Strategy", overlay=true, margin_long=100, margin_short=100)
+
+//calculate sar value
+start = input(0.02)
+increment = input(0.02)
+maximum = input(0.2, "Max Value")
+sar = ta.sar(start, increment, maximum)
+plot(sar,style=plot.style_cross, linewidth=3, color=color.orange)
+
+// var stuff
+var bool start_uptrend = na
+var bool now_uptrend = na
+var bool last_uptrend = na
+var num = 0
+
+//def starting bar
+num := 1
+
+//def start_uptrend
+if bar_index == num
+    if close > sar
+        start_uptrend := true
+    else    
+        start_uptrend := false
+
+//def last_uptrend
+if bar_index == num+1
+    last_uptrend := start_uptrend
+if bar_index > num+1
+    last_uptrend := now_uptrend
+
+//judge if this bar verse
+if bar_index > num
+    if close > sar
+        now_uptrend := true
+    else 
+        now_uptrend := false
+
+
+
+longCondition = (last_uptrend != now_uptrend) and (now_uptrend == false)
+if (longCondition)
+    strategy.entry("Long Entry", strategy.long)
+
+shortCondition = (last_uptrend != now_uptrend) and (now_uptrend == true)
+if (shortCondition)
+    strategy.entry("Short Entry", strategy.short)
+
+// if strategy.opentrades != 0
+//     if (longCondition)
+//       strategy.cancel("cancel short")
+//     if (shortCondition)
+//       strategy.cancel("cancel long")
