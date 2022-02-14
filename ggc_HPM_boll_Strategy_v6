@@ -1,0 +1,145 @@
+//@version=5
+// 开单逻辑： 按 文档。
+//last update : 2022-2-14 13:07
+
+strategy("ggc_HPM_boll_Strategy_v6", overlay=true)
+//indicator calculate
+source = close
+length = input.int(200, minval=1)
+mult = input.float(2.0, minval=0.001, maxval=50)
+basis = ta.sma(source, length)
+dev = mult * ta.stdev(source, length)
+upper = basis + dev
+lower = basis - dev
+
+bbw_5000 = (upper-lower)/basis*5000 // dev/price = 1 in dimension
+
+period = 40
+roc_gbbw = 100 * (bbw_5000 - bbw_5000[period])/bbw_5000[period]
+
+ma200 = ta.sma(close,200)
+roi_ma200 = (ma200 - ma200[1])/ma200[1] * 1000000
+
+//var stuff
+var trade_status = 0 //show last status // 0: none // 1: opening_long //-1: opening_short
+var bool filter_non_hpm = true
+var bool filter_avoid_trend = true
+var bool filter = true
+var bool condition_begin_fly_up = false
+var bool condition_begin_fly_down = false
+var bool condition_stoploss_protect_up = true
+var bool condition_stoploss_protect_down = true
+
+//filter
+//filter_non_hpm
+if bbw_5000 < 10000 //TODO: 目前是报废的状态。
+    filter_non_hpm := true 
+else
+    filter_non_hpm := true//false //forbidden
+    
+//filter_avoid_trend
+if trade_status == 95  //tigger stop_loss_sell
+    if roi_ma200 < -200 //-300 can adjust parameter. 200 maybe is the best.
+        filter_avoid_trend := false
+    else
+        filter_avoid_trend := true
+        trade_status := 90 //Downgraded to common sell level, AKA dont need to check filter_avoid_trend anymore until next stop_loss_sell.
+        
+if trade_status == 96  //tigger stop_loss_cover
+    if roi_ma200 > 200 //-300 can adjust parameter
+        filter_avoid_trend := false
+    else
+        filter_avoid_trend := true
+        trade_status := 90 //Downgraded to common sell level, AKA dont need to check filter_avoid_trend anymore until next stop_loss_cover.
+        
+//filter gather
+if filter_non_hpm == true and filter_avoid_trend == true
+    filter := true
+else
+    filter := false
+
+
+//condition judgment
+//condition_begin_fly_up/down
+if roc_gbbw > 100 and trade_status == 1 and roi_ma200 > 0// TODO: debug on 2021-12-31 01:45.....need plus a direction.
+    condition_begin_fly_up := true
+    
+if roc_gbbw > 100 and trade_status == -1 and roi_ma200 <0// TODO: debug on 2021-12-31 01:45.....need plus a direction.
+    condition_begin_fly_down := true
+
+//condition_stoploss_protect
+// when protect is true, means you cant stop_loss so far. only protect is false, you are allowed to do stop_loss.
+if roc_gbbw > 50 and trade_status == 1 and condition_stoploss_protect_up == true
+    condition_stoploss_protect_up := false
+if  roc_gbbw > 50 and trade_status == -1 and condition_stoploss_protect_down == true
+    condition_stoploss_protect_down := false
+
+
+
+// buy
+if (ta.crossover(source, lower)) 
+	if filter== true and strategy.opentrades == 0// TODO: 想清楚为什么直接开单会更亏？
+        strategy.entry("longBuy", strategy.long, qty=1, comment="buy")
+        trade_status := 1
+
+// short
+if (ta.crossunder(source, upper)) 
+	if filter == true and strategy.opentrades == 0
+        strategy.entry("shortBuy", strategy.short, qty=1, comment="short")
+        trade_status := -1
+
+// sell
+if (ta.crossunder(source, basis))
+    if condition_begin_fly_up == true and trade_status == 1 //and strategy.opentrades != 0 
+        strategy.close("longBuy", qty = 1, comment = "special_sell")
+        condition_begin_fly_up := false
+        condition_stoploss_protect_up := true
+        trade_status := 91
+    
+if (ta.crossunder(source, upper))
+    if condition_begin_fly_up == false and trade_status == 1//and strategy.opentrades != 0 
+        strategy.close("longBuy", qty = 1, comment = "sell")
+        condition_begin_fly_up := false
+        condition_stoploss_protect_up := true
+        trade_status := 92
+
+
+// cover
+if (ta.crossover(source, basis))
+    if condition_begin_fly_down == true and trade_status == -1//and strategy.opentrades != 0 
+        strategy.close("shortBuy", qty = 1, comment = "special_cover")
+        condition_begin_fly_down := false
+        condition_stoploss_protect_up := true
+        trade_status := 93
+        
+if (ta.crossover(source, lower))
+    if condition_begin_fly_down == false and trade_status == -1//and strategy.opentrades != 0
+        strategy.close("shortBuy", qty = 1, comment = "cover")
+        condition_begin_fly_down := false
+        condition_stoploss_protect_down := true
+        trade_status := 94
+
+
+//止损
+//strategy.exit("stop_loss", loss = 20000)
+//等效止损, below:
+if strategy.openprofit < -200 and trade_status == 1 and condition_stoploss_protect_up == false//true
+    strategy.close("longBuy", qty = 1, comment = "stop_loss_sell")
+    condition_begin_fly_up := false
+    condition_stoploss_protect_up := true
+    trade_status := 95
+
+if strategy.openprofit < -200 and trade_status == -1 and condition_stoploss_protect_down == false//true
+    strategy.close("shortBuy", qty = 1, comment = "stop_loss_cover")
+    condition_begin_fly_down := false
+    condition_stoploss_protect_down := true
+    trade_status := 96
+
+
+//plot part 
+// offset = input.int(0, "Offset", minval = -500, maxval = 500)
+// plot(basis, "Basis", color=#FF6D00, offset = offset)
+// p1 = plot(upper, "Upper", color=#2962FF, offset = offset)
+// p2 = plot(lower, "Lower", color=#2962FF, offset = offset)
+// fill(p1, p2, title = "Background", color=color.rgb(33, 150, 243, 95))
+
